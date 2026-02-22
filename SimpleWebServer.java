@@ -166,6 +166,14 @@ public class SimpleWebServer {
     static class FileHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Only allow GET and HEAD methods
+            String method = exchange.getRequestMethod();
+            if (!method.equals("GET") && !method.equals("HEAD")) {
+                sendError(exchange, 405, "Method Not Allowed");
+                System.out.println("405 METHOD NOT ALLOWED: " + method);
+                return;
+            }
+            
             String path = exchange.getRequestURI().getPath();
             
             // Decode URL to prevent path traversal attacks
