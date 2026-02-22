@@ -15,7 +15,7 @@
 ### Запуск
 
 ```bash
-java -jar testserver.jar
+java -jar server.jar
 ```
 
 Сервер запустится на `http://0.0.0.0:8080` и будет отдавать все файлы из папки `public/`.
@@ -133,14 +133,14 @@ cp -r /var/www/test sites/test
 
 3. Запусти сервер:
 ```bash
-java -jar testserver.jar
+java -jar server.jar
 ```
 
 ## Структура проекта
 
 ```
 .
-├── testserver.jar          # Готовый JAR файл
+├── server.jar          # Готовый JAR файл
 ├── server.conf             # Конфигурация (создается автоматически)
 ├── public/                 # Дефолтная папка для файлов
 │   └── index.html
@@ -169,14 +169,14 @@ java -jar testserver.jar
 
 ```bash
 javac SimpleWebServer.java
-jar -cvfm testserver.jar MANIFEST.MF *.class
+jar -cvfm server.jar MANIFEST.MF *.class
 ```
 
 ## Деплой на хостинг
 
 ### Pterodactyl Panel
 
-1. Загрузи `testserver.jar` как `server.jar`
+1. Загрузи `server.jar` как `server.jar`
 2. Настрой `server.conf`:
 ```nginx
 listen 25565;  # Или твой порт из панели
@@ -193,10 +193,10 @@ server {
 ```dockerfile
 FROM openjdk:21-slim
 WORKDIR /app
-COPY testserver.jar .
+COPY server.jar .
 COPY server.conf .
 EXPOSE 8080
-CMD ["java", "-jar", "testserver.jar"]
+CMD ["java", "-jar", "server.jar"]
 ```
 
 ## Ограничения
