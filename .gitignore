@@ -16,7 +16,6 @@ Thumbs.db
 # Server runtime files
 public/
 sites/
-server.conf
 
 # Logs
 *.log
