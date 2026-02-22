@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpExchange;
 
 import java.io.*;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -166,6 +168,14 @@ public class SimpleWebServer {
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
             
+            // Decode URL to prevent path traversal attacks
+            try {
+                path = URLDecoder.decode(path, StandardCharsets.UTF_8.name());
+            } catch (Exception e) {
+                sendError(exchange, 400, "Bad Request");
+                return;
+            }
+            
             // Get Host header to determine which vhost to use
             String hostHeader = exchange.getRequestHeaders().getFirst("Host");
             String domain = hostHeader != null ? hostHeader.split(":")[0].toLowerCase() : "";
@@ -177,12 +187,24 @@ public class SimpleWebServer {
                 System.out.println("Using vhost: " + domain + " -> " + baseDir);
             }
             
-            // Если запрос к корню, отдаем index.html
+            // If request to root, serve index.html
             if (path.equals("/")) {
                 path = "/index.html";
             }
-
-            File file = new File(baseDir + path);
+            
+            // Normalize path and check for path traversal
+            try {
+                Path basePath = Paths.get(baseDir).toAbsolutePath().normalize();
+                Path requestedPath = basePath.resolve(path.substring(1)).normalize();
+                
+                // Security check: ensure requested path is within base directory
+                if (!requestedPath.startsWith(basePath)) {
+                    System.out.println("403 FORBIDDEN (path traversal attempt): " + path);
+                    sendError(exchange, 403, "Forbidden");
+                    return;
+                }
+                
+                File file = requestedPath.toFile();
 
             // Check if file exists and is not a directory
             if (file.exists() && file.isFile()) {
@@ -201,15 +223,20 @@ public class SimpleWebServer {
                 System.out.println("200 OK: " + path);
             } else {
                 // File not found
-                String response = "404 - File not found";
-                exchange.sendResponseHeaders(404, response.length());
-                
-                OutputStream os = exchange.getResponseBody();
-                os.write(response.getBytes());
-                os.close();
-                
+                sendError(exchange, 404, "File not found");
                 System.out.println("404 NOT FOUND: " + path);
             }
+            } catch (Exception e) {
+                sendError(exchange, 500, "Internal Server Error");
+                e.printStackTrace();
+            }
+        }
+        
+        private void sendError(HttpExchange exchange, int code, String message) throws IOException {
+            exchange.sendResponseHeaders(code, message.length());
+            OutputStream os = exchange.getResponseBody();
+            os.write(message.getBytes());
+            os.close();
         }
 
         private String getContentType(String fileName) {
