@@ -1,0 +1,22 @@
+# Compiled class files
+*.class
+
+# JAR files (keep only releases)
+*.jar
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Server runtime files
+public/
+sites/
+server.conf
+
+# Logs
+*.log
