@@ -180,7 +180,7 @@ jar -cvfm server.jar MANIFEST.MF *.class
 2. Настрой `server.conf`:
 ```nginx
 listen 25565;  # Или твой порт из панели
-host 0.0.0.0;
+host 0.0.0.0;всё
 
 server {
     root public;

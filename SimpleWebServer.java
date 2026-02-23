@@ -86,10 +86,17 @@ public class SimpleWebServer {
 
     private static HttpsServer createHttpsServer(InetSocketAddress address) throws IOException {
         try {
-            // Auto-generate self-signed certificate if keystore doesn't exist
+            // Check if PEM files exist in ssl/ folder
+            File certFile = new File("ssl/cert.pem");
+            File keyFile = new File("ssl/key.pem");
+            
             File keystoreFile = new File(sslKeystorePath);
-            if (!keystoreFile.exists()) {
-                System.out.println("Keystore not found, generating self-signed certificate...");
+            
+            if (certFile.exists() && keyFile.exists()) {
+                System.out.println("Found PEM certificates in ssl/ folder, converting to keystore...");
+                convertPemToKeystore();
+            } else if (!keystoreFile.exists()) {
+                System.out.println("No certificates found, generating self-signed certificate...");
                 generateSelfSignedCertificate();
             }
             
@@ -121,6 +128,72 @@ public class SimpleWebServer {
             System.err.println("Failed to setup SSL: " + e.getMessage());
             System.err.println("Falling back to HTTP");
             throw new IOException("SSL setup failed", e);
+        }
+    }
+
+    private static void convertPemToKeystore() {
+        try {
+            System.out.println("Converting PEM certificates to keystore...");
+            
+            // Step 1: Convert PEM to PKCS12
+            String[] pkcs12Command = {
+                "openssl", "pkcs12", "-export",
+                "-in", "ssl/cert.pem",
+                "-inkey", "ssl/key.pem",
+                "-out", "ssl/keystore.p12",
+                "-name", "server",
+                "-password", "pass:" + sslKeystorePassword
+            };
+            
+            ProcessBuilder pb1 = new ProcessBuilder(pkcs12Command);
+            pb1.redirectErrorStream(true);
+            Process process1 = pb1.start();
+            
+            BufferedReader reader1 = new BufferedReader(new InputStreamReader(process1.getInputStream()));
+            String line;
+            while ((line = reader1.readLine()) != null) {
+                System.out.println(line);
+            }
+            
+            int exitCode1 = process1.waitFor();
+            if (exitCode1 != 0) {
+                System.err.println("Failed to convert PEM to PKCS12, exit code: " + exitCode1);
+                return;
+            }
+            
+            // Step 2: Convert PKCS12 to JKS
+            String[] jksCommand = {
+                "keytool",
+                "-importkeystore",
+                "-srckeystore", "ssl/keystore.p12",
+                "-srcstoretype", "PKCS12",
+                "-srcstorepass", sslKeystorePassword,
+                "-destkeystore", sslKeystorePath,
+                "-deststoretype", "JKS",
+                "-deststorepass", sslKeystorePassword,
+                "-noprompt"
+            };
+            
+            ProcessBuilder pb2 = new ProcessBuilder(jksCommand);
+            pb2.redirectErrorStream(true);
+            Process process2 = pb2.start();
+            
+            BufferedReader reader2 = new BufferedReader(new InputStreamReader(process2.getInputStream()));
+            while ((line = reader2.readLine()) != null) {
+                System.out.println(line);
+            }
+            
+            int exitCode2 = process2.waitFor();
+            if (exitCode2 == 0) {
+                System.out.println("Successfully converted PEM certificates to keystore!");
+                // Clean up temporary PKCS12 file
+                new File("ssl/keystore.p12").delete();
+            } else {
+                System.err.println("Failed to convert PKCS12 to JKS, exit code: " + exitCode2);
+            }
+        } catch (Exception e) {
+            System.err.println("Error converting PEM to keystore: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
