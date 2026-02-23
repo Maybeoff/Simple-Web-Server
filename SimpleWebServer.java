@@ -1,7 +1,12 @@
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsServer;
+import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpExchange;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
@@ -9,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.KeyStore;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -18,6 +24,9 @@ public class SimpleWebServer {
     private static String HOST = "0.0.0.0";
     private static String defaultRoot = "public";
     private static Map<String, String> vhosts = new HashMap<>();
+    private static boolean sslEnabled = false;
+    private static String sslKeystorePath = null;
+    private static String sslKeystorePassword = null;
 
     public static void main(String[] args) throws IOException {
         // Load configuration
@@ -30,16 +39,23 @@ public class SimpleWebServer {
             System.out.println("Created folder: " + defaultRoot);
         }
 
-        // Create HTTP server
+        // Create HTTP/HTTPS server
         InetSocketAddress address = HOST.equals("0.0.0.0") 
             ? new InetSocketAddress(PORT) 
             : new InetSocketAddress(HOST, PORT);
-        HttpServer server = HttpServer.create(address, 0);
+        
+        HttpServer server;
+        if (sslEnabled && sslKeystorePath != null) {
+            server = createHttpsServer(address);
+            System.out.println("Server started at https://" + HOST + ":" + PORT);
+        } else {
+            server = HttpServer.create(address, 0);
+            System.out.println("Server started at http://" + HOST + ":" + PORT);
+        }
+        
         server.createContext("/", new FileHandler());
         server.setExecutor(null);
         server.start();
-
-        System.out.println("Server started at http://" + HOST + ":" + PORT);
         System.out.println("Serving files from: " + publicPath.toAbsolutePath());
         if (!vhosts.isEmpty()) {
             System.out.println("Virtual hosts configured: " + vhosts.size());
@@ -66,6 +82,86 @@ public class SimpleWebServer {
         });
         commandThread.setDaemon(false);
         commandThread.start();
+    }
+
+    private static HttpsServer createHttpsServer(InetSocketAddress address) throws IOException {
+        try {
+            // Auto-generate self-signed certificate if keystore doesn't exist
+            File keystoreFile = new File(sslKeystorePath);
+            if (!keystoreFile.exists()) {
+                System.out.println("Keystore not found, generating self-signed certificate...");
+                generateSelfSignedCertificate();
+            }
+            
+            HttpsServer httpsServer = HttpsServer.create(address, 0);
+            
+            // Load keystore
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            try (FileInputStream fis = new FileInputStream(sslKeystorePath)) {
+                keyStore.load(fis, sslKeystorePassword.toCharArray());
+            }
+            
+            // Setup key manager factory
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+            kmf.init(keyStore, sslKeystorePassword.toCharArray());
+            
+            // Setup trust manager factory
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
+            tmf.init(keyStore);
+            
+            // Setup SSL context
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+            
+            httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+            
+            System.out.println("SSL enabled with keystore: " + sslKeystorePath);
+            return httpsServer;
+        } catch (Exception e) {
+            System.err.println("Failed to setup SSL: " + e.getMessage());
+            System.err.println("Falling back to HTTP");
+            throw new IOException("SSL setup failed", e);
+        }
+    }
+
+    private static void generateSelfSignedCertificate() {
+        try {
+            // Use keytool to generate self-signed certificate
+            String[] command = {
+                "keytool",
+                "-genkeypair",
+                "-alias", "server",
+                "-keyalg", "RSA",
+                "-keysize", "2048",
+                "-validity", "365",
+                "-keystore", sslKeystorePath,
+                "-storepass", sslKeystorePassword,
+                "-keypass", sslKeystorePassword,
+                "-dname", "CN=localhost, OU=SimpleWebServer, O=Auto-Generated, L=Unknown, ST=Unknown, C=US"
+            };
+            
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            
+            // Read output
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println(line);
+            }
+            
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                System.out.println("Self-signed certificate generated successfully: " + sslKeystorePath);
+                System.out.println("WARNING: Self-signed certificates are not trusted by browsers!");
+            } else {
+                System.err.println("Failed to generate certificate, exit code: " + exitCode);
+            }
+        } catch (Exception e) {
+            System.err.println("Error generating self-signed certificate: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     private static void loadConfig() {
@@ -95,6 +191,18 @@ public class SimpleWebServer {
                 // Parse host directive
                 else if (line.startsWith("host ")) {
                     HOST = line.substring(5).replace(";", "").trim();
+                }
+                
+                // Parse SSL directives
+                else if (line.startsWith("ssl ")) {
+                    String value = line.substring(4).replace(";", "").trim();
+                    sslEnabled = value.equals("on") || value.equals("true");
+                }
+                else if (line.startsWith("ssl_keystore ")) {
+                    sslKeystorePath = line.substring(13).replace(";", "").trim();
+                }
+                else if (line.startsWith("ssl_keystore_password ")) {
+                    sslKeystorePassword = line.substring(22).replace(";", "").trim();
                 }
                 
                 // Parse server block start
@@ -148,6 +256,10 @@ public class SimpleWebServer {
             writer.write("# Simple Web Server Configuration\n\n");
             writer.write("listen 8080;\n");
             writer.write("host 0.0.0.0;\n\n");
+            writer.write("# SSL Configuration (optional)\n");
+            writer.write("# ssl on;\n");
+            writer.write("# ssl_keystore /path/to/keystore.jks;\n");
+            writer.write("# ssl_keystore_password changeit;\n\n");
             writer.write("# Default server\n");
             writer.write("server {\n");
             writer.write("    root public;\n");
