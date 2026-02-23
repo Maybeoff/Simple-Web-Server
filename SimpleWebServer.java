@@ -403,15 +403,21 @@ public class SimpleWebServer {
             if (file.exists() && file.isFile()) {
                 // Determine Content-Type
                 String contentType = getContentType(file.getName());
-                
-                byte[] fileContent = Files.readAllBytes(file.toPath());
+                long fileSize = file.length();
                 
                 exchange.getResponseHeaders().set("Content-Type", contentType);
-                exchange.sendResponseHeaders(200, fileContent.length);
+                exchange.sendResponseHeaders(200, fileSize);
                 
-                OutputStream os = exchange.getResponseBody();
-                os.write(fileContent);
-                os.close();
+                // Stream file in chunks to avoid loading entire file into memory
+                try (FileInputStream fis = new FileInputStream(file);
+                     OutputStream os = exchange.getResponseBody()) {
+                    
+                    byte[] buffer = new byte[8192]; // 8KB buffer
+                    int bytesRead;
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        os.write(buffer, 0, bytesRead);
+                    }
+                }
                 
                 System.out.println("200 OK: " + path);
             } else {
@@ -441,7 +447,10 @@ public class SimpleWebServer {
             if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) return "image/jpeg";
             if (fileName.endsWith(".gif")) return "image/gif";
             if (fileName.endsWith(".svg")) return "image/svg+xml";
-            return "text/plain";
+            if (fileName.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
+            if (fileName.endsWith(".ts")) return "video/mp2t";
+            if (fileName.endsWith(".mp4")) return "video/mp4";
+            return "application/octet-stream";
         }
     }
 }
